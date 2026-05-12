@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>日常拾光 | 文青雲端記帳旗艦版</title>
+    <title>日常拾光 | 雲端全能資產管理</title>
     <!-- Vue 3 -->
     <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
     <!-- Tailwind CSS -->
@@ -11,7 +11,7 @@
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
     
-    <!-- Firebase SDKs (Compat version for easier integration) -->
+    <!-- Firebase SDKs -->
     <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore-compat.js"></script>
@@ -31,10 +31,8 @@
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #e2e2e2; border-radius: 10px; }
 
-        /* Animations */
         .fade-enter-active, .fade-leave-active { transition: opacity 0.3s; }
         .fade-enter-from, .fade-leave-to { opacity: 0; }
-
         .slide-up-enter-active, .slide-up-leave-active { transition: transform 0.3s ease-out; }
         .slide-up-enter-from, .slide-up-leave-to { transform: translateY(100%); }
 
@@ -54,20 +52,21 @@
         }
 
         .btn-active-scale:active { transform: scale(0.95); }
+        
+        .trend-bar-income { background-color: #10b981; opacity: 0.4; }
+        .trend-bar-expense { background-color: #a8a29e; opacity: 0.4; }
     </style>
 </head>
 <body class="h-screen overflow-hidden">
     <div id="app" class="h-full flex flex-col max-w-md mx-auto bg-white shadow-2xl relative overflow-hidden">
         
-        <!-- Loading Overlay -->
         <transition name="fade">
             <div v-if="loading" class="loading-overlay">
-                <div class="w-10 h-10 border-2 border-stone-200 border-t-stone-800 rounded-full animate-spin mb-4"></div>
-                <p class="text-[10px] tracking-[0.3em] text-stone-400 uppercase">拾光同步中...</p>
+                <div v-div class="w-10 h-10 border-2 border-stone-200 border-t-stone-800 rounded-full animate-spin mb-4"></div>
+                <p class="text-[10px] tracking-[0.3em] text-stone-400 uppercase">雲端同步中...</p>
             </div>
         </transition>
 
-        <!-- Header -->
         <header class="pt-10 pb-6 px-6 bg-[#fcfbf7] border-b border-stone-100 shrink-0">
             <div class="flex justify-between items-start mb-5">
                 <div>
@@ -77,10 +76,24 @@
                     </p>
                 </div>
                 <div class="text-right">
-                    <p class="text-[10px] tracking-[0.2em] text-stone-400 uppercase mb-1">Active</p>
-                    <div class="flex items-center justify-end text-stone-600 font-medium">
-                        <i data-lucide="wallet" class="w-3.5 h-3.5 mr-1.5 opacity-50"></i>
-                        <span class="text-xs">{{ activeAsset?.name || '無帳戶' }}</span>
+                    <p class="text-[10px] tracking-[0.2em] text-stone-400 uppercase mb-1">Accounts</p>
+                    <div class="flex items-center justify-end text-stone-600 font-medium mb-1">
+                        <span class="text-xs">{{ assets.length }} 個帳戶</span>
+                    </div>
+                    <!-- 雲端狀態指示燈 -->
+                    <div class="flex items-center justify-end space-x-1.5">
+                        <template v-if="syncStatus === 'syncing'">
+                            <i data-lucide="refresh-cw" class="w-2.5 h-2.5 text-stone-400 animate-spin"></i>
+                            <span class="text-[9px] text-stone-400 font-bold uppercase tracking-tighter">同步中</span>
+                        </template>
+                        <template v-else-if="syncStatus === 'offline'">
+                            <div class="w-2 h-2 bg-rose-500 rounded-full"></div>
+                            <span class="text-[9px] text-stone-400 font-bold uppercase tracking-tighter">離線</span>
+                        </template>
+                        <template v-else-if="syncStatus === 'synced'">
+                            <div class="w-2 h-2 bg-emerald-500 rounded-full"></div>
+                            <span class="text-[9px] text-stone-400 font-bold uppercase tracking-tighter">已同步</span>
+                        </template>
                     </div>
                 </div>
             </div>
@@ -93,22 +106,23 @@
                 </div>
                 <div class="flex space-x-4 text-right">
                     <div>
-                        <p class="text-[8px] text-stone-400 uppercase">In</p>
-                        <p class="text-xs font-medium text-emerald-600">+{{ formatCurrency(totalIncome) }}</p>
+                        <p class="text-[8px] text-stone-400 uppercase">Net In</p>
+                        <p class="text-xs font-medium text-emerald-600">+{{ formatAmount(totalIncome) }}</p>
                     </div>
                     <div class="border-l border-stone-200 pl-4">
-                        <p class="text-[8px] text-stone-400 uppercase">Out</p>
-                        <p class="text-xs font-medium text-stone-600">-{{ formatCurrency(totalExpense) }}</p>
+                        <p class="text-[8px] text-stone-400 uppercase">Net Out</p>
+                        <p class="text-xs font-medium text-stone-600">-{{ formatAmount(totalExpense) }}</p>
                     </div>
                 </div>
             </div>
         </header>
 
-        <!-- Main Content -->
         <main class="flex-1 overflow-y-auto custom-scrollbar px-6 py-4 pb-32">
             
-            <!-- 1. 概覽分頁 -->
+            <!-- 1. 概覽分頁 (合併明細與待收) -->
             <div v-if="activeTab === 'overview'" class="space-y-8 animate-in fade-in duration-500">
+                
+                <!-- 待收摘要區塊 -->
                 <section v-if="receivablesByPerson.length > 0">
                     <div class="flex justify-between items-center mb-4">
                         <h3 class="text-[10px] font-bold text-stone-400 uppercase tracking-widest">Receivables 待收摘要</h3>
@@ -125,8 +139,9 @@
                     </div>
                 </section>
 
+                <!-- 交易明細列表 -->
                 <section class="space-y-6">
-                    <h3 class="text-[10px] font-bold text-stone-400 uppercase tracking-widest">Activity 交易紀錄</h3>
+                    <h3 class="text-[10px] font-bold text-stone-400 uppercase tracking-widest">Global Activity 全局紀錄</h3>
                     <div v-if="groupedRecords.length === 0" class="flex flex-col items-center justify-center py-16 text-stone-300">
                         <i data-lucide="feather" class="w-12 h-12 mb-4 opacity-10"></i>
                         <p class="text-xs italic tracking-wider">本月尚未有紀錄，點擊右下角開始。</p>
@@ -142,22 +157,25 @@
                                  class="flex items-center justify-between group cursor-pointer bg-white p-2 rounded-2xl active:bg-stone-50 transition-all shadow-sm border border-stone-50">
                                 <div class="flex items-center space-x-4">
                                     <div class="w-10 h-10 rounded-full flex items-center justify-center bg-stone-50 text-stone-400 border border-stone-100">
-                                        <i :data-lucide="getCategoryIcon(record.category)" class="w-4.5 h-4.5"></i>
+                                        <i :data-lucide="getCategoryIcon(record.category, record.type)" class="w-4.5 h-4.5"></i>
                                     </div>
                                     <div>
                                         <p class="text-sm font-medium flex items-center gap-2">
-                                            {{ record.category }}
+                                            {{ record.type === 'transfer' ? '轉帳' : record.category }}
                                             <span v-if="record.isPending" class="text-[8px] bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded border border-amber-100">待收</span>
                                         </p>
                                         <p class="text-[10px] text-stone-400 line-clamp-1">
-                                            <span v-if="record.counterparty" class="text-stone-500 font-medium mr-1">@{{ record.counterparty }}</span>
+                                            <span v-if="record.type === 'transfer'" class="text-stone-500 font-medium mr-1 italic">
+                                                {{ getAssetName(record.assetId) }} → {{ getAssetName(record.toAssetId) }}
+                                            </span>
+                                            <span v-else class="text-stone-500 font-medium mr-1">{{ getAssetName(record.assetId) }}</span>
                                             {{ record.note || '無備註描述' }}
                                         </p>
                                     </div>
                                 </div>
                                 <div class="text-right">
-                                    <p class="text-sm font-bold" :class="record.type === 'income' ? (record.isPending ? 'text-amber-500' : 'text-emerald-500') : 'text-stone-700'">
-                                        {{ record.type === 'income' ? '+' : '-' }}{{ formatAmount(record.amount) }}
+                                    <p class="text-sm font-bold" :class="getRecordColorClass(record)">
+                                        {{ getRecordPrefix(record) }}{{ formatAmount(record.amount) }}
                                     </p>
                                 </div>
                             </div>
@@ -166,7 +184,6 @@
                 </section>
             </div>
 
-            <!-- 2. 分析分頁 -->
             <div v-if="activeTab === 'stats'" class="space-y-10 animate-in fade-in duration-500">
                 <section>
                     <h3 class="text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-4">Calendar 拾光月曆</h3>
@@ -185,15 +202,23 @@
                 </section>
 
                 <section>
+                    <h3 class="text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-4">Daily Trend 每日走勢</h3>
+                    <div class="bg-stone-50 rounded-3xl p-6 border border-stone-100 shadow-sm h-32 flex items-end justify-between space-x-1">
+                        <div v-for="(day, idx) in trendData" :key="idx" class="flex-1 flex flex-col items-center group relative">
+                            <div v-if="day.expense > 0" class="trend-bar-expense w-full rounded-t-sm" :style="{ height: (day.expense / maxTrendValue * 100) + '%' }"></div>
+                            <div v-if="day.income > 0" class="trend-bar-income w-full rounded-t-sm" :style="{ height: (day.income / maxTrendValue * 100) + '%' }"></div>
+                        </div>
+                    </div>
+                </section>
+
+                <section>
                     <h3 class="text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-4">Category Analysis 支出占比</h3>
-                    <div v-if="categoryStats.length === 0" class="text-center py-10 text-stone-300 text-sm">此帳本本月無支出數據</div>
+                    <div v-if="categoryStats.length === 0" class="text-center py-10 text-stone-300 text-sm">暫無分析數據</div>
                     <div v-else class="space-y-6">
-                        <div v-for="stat in categoryStats" :key="stat.category" @click="showCategoryDetailModal(stat.category)" class="group cursor-pointer active:scale-[0.98] transition-transform">
+                        <div v-for="stat in categoryStats" :key="stat.category" class="group transition-transform">
                             <div class="flex justify-between text-xs mb-2">
-                                <span class="text-stone-700 font-medium flex items-center gap-2">
-                                    {{ stat.category }} <i data-lucide="chevron-right" class="w-3 h-3 text-stone-300"></i>
-                                </span>
-                                <span class="text-stone-400 font-light">{{ stat.percentage }}% · {{ formatCurrency(stat.total) }}</span>
+                                <span class="text-stone-700 font-medium">{{ stat.category }}</span>
+                                <span class="text-stone-400 font-light">{{ stat.percentage }}% · {{ formatAmount(stat.total) }}</span>
                             </div>
                             <div class="h-1.5 w-full bg-stone-100 rounded-full overflow-hidden">
                                 <div class="h-full bg-stone-800 rounded-full transition-all duration-1000" :style="{ width: stat.percentage + '%' }"></div>
@@ -203,32 +228,29 @@
                 </section>
             </div>
 
-            <!-- 3. 資產帳本管理 -->
             <div v-if="activeTab === 'assets'" class="space-y-6 animate-in fade-in duration-500">
                 <div class="flex justify-between items-end mb-4">
-                    <h3 class="text-[10px] font-bold text-stone-400 uppercase tracking-widest">Assets 資產帳戶</h3>
-                    <button @click="openAssetModal()" class="text-[10px] bg-stone-800 text-white px-4 py-1.5 rounded-full shadow-lg btn-active-scale transition-transform">+ 新增帳戶</button>
+                    <h3 class="text-[10px] font-bold text-stone-400 uppercase tracking-widest">Assets 資產清單</h3>
+                    <button @click="openAssetModal()" class="text-[10px] bg-stone-800 text-white px-4 py-1.5 rounded-full shadow-lg btn-active-scale">+ 新增帳戶</button>
                 </div>
                 
                 <div class="grid grid-cols-1 gap-4">
                     <div v-for="asset in assets" :key="asset.id" 
-                         @click="switchAsset(asset)"
-                         class="group flex items-center justify-between p-6 rounded-[2rem] border transition-all cursor-pointer shadow-sm"
-                         :class="activeAssetId === asset.id ? 'bg-stone-800 border-stone-800 text-white' : 'bg-white border-stone-100 hover:border-stone-200'">
+                         class="group flex items-center justify-between p-6 rounded-[2rem] border bg-white border-stone-100 shadow-sm">
                         <div class="flex items-center gap-4">
-                            <div class="w-12 h-12 rounded-full flex items-center justify-center transition-colors" :class="activeAssetId === asset.id ? 'bg-stone-700' : 'bg-stone-50'">
-                                <i data-lucide="wallet" class="w-6 h-6" :class="activeAssetId === asset.id ? 'text-stone-100' : 'text-stone-400'"></i>
+                            <div class="w-12 h-12 rounded-full flex items-center justify-center bg-stone-50">
+                                <i :data-lucide="getAssetTypeIcon(asset.type)" class="w-6 h-6 text-stone-400"></i>
                             </div>
                             <div>
                                 <p class="text-base font-medium">{{ asset.name }}</p>
-                                <p class="text-[10px] opacity-60 uppercase tracking-tighter">{{ getAssetBalance(asset.id) >= 0 ? 'Normal Account' : 'Overdrawn' }}</p>
+                                <p class="text-[10px] opacity-60 uppercase tracking-tighter">{{ asset.type || '未分類' }}</p>
                             </div>
                         </div>
                         <div class="flex items-center gap-4">
-                            <p class="text-lg font-bold tracking-tight" :class="activeAssetId === asset.id ? 'text-white' : (getAssetBalance(asset.id) >= 0 ? 'text-stone-800' : 'text-rose-500')">
+                            <p class="text-lg font-bold tracking-tight" :class="getAssetBalance(asset.id) >= 0 ? 'text-stone-800' : 'text-rose-500'">
                                 {{ formatCurrency(getAssetBalance(asset.id)) }}
                             </p>
-                            <button @click.stop="openAssetModal(asset)" class="p-2 rounded-full transition-colors hover:bg-stone-100/10">
+                            <button @click.stop="openAssetModal(asset)" class="p-2 rounded-full hover:bg-stone-100">
                                 <i data-lucide="settings-2" class="w-4 h-4 text-stone-400"></i>
                             </button>
                         </div>
@@ -236,69 +258,67 @@
                 </div>
             </div>
 
-            <!-- 4. 設定分頁 -->
             <div v-if="activeTab === 'settings'" class="space-y-8 animate-in fade-in duration-500">
                 <section v-for="type in ['expense', 'income']" :key="type">
                     <h3 class="text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-4">{{ type === 'expense' ? '支出分類管理' : '收入分類管理' }}</h3>
                     <div class="flex flex-wrap gap-2 mb-5">
                         <div v-for="(cat, index) in categories[type]" :key="index" class="flex items-center gap-1 bg-white border border-stone-100 text-stone-600 text-[11px] px-3 py-1.5 rounded-full shadow-sm">
-                            {{ cat }} <button @click="deleteCategory(type, index)" class="text-stone-300 hover:text-rose-400 ml-1 transition-colors"><i data-lucide="x" class="w-3 h-3"></i></button>
+                            {{ cat }} <button @click="deleteCategory(type, index)" class="text-stone-300 hover:text-rose-400 ml-1"><i data-lucide="x" class="w-3 h-3"></i></button>
                         </div>
                     </div>
                     <div class="flex gap-2">
-                        <input type="text" v-model="newCatInput[type]" placeholder="新增分類名稱..." class="flex-1 bg-stone-50 border-none rounded-2xl text-xs p-4 focus:ring-1 focus:ring-stone-200 shadow-inner">
+                        <input type="text" v-model="newCatInput[type]" placeholder="新增分類名稱..." class="flex-1 bg-stone-50 border-none rounded-2xl text-xs p-4 shadow-inner">
                         <button @click="addCategory(type)" class="px-6 bg-stone-800 text-white rounded-2xl text-xs font-bold btn-active-scale transition-transform">添加</button>
                     </div>
                 </section>
+                <div class="pt-8 text-center border-t border-stone-100">
+                    <p class="text-[10px] text-stone-300 uppercase tracking-[0.3em]">拾光雲端版 · 已自動同步</p>
+                </div>
             </div>
         </main>
 
         <!-- Floating Action Button -->
-        <transition name="fade">
-            <button v-if="activeTab === 'overview'" @click="showModal = true" 
-                    class="absolute bottom-28 right-6 w-16 h-16 bg-stone-800 text-white rounded-full shadow-2xl flex items-center justify-center btn-active-scale transition-transform z-20">
-                <i data-lucide="plus" class="w-7 h-7"></i>
-            </button>
-        </transition>
+        <button v-if="activeTab === 'overview'" @click="showModal = true" 
+                class="absolute bottom-28 right-6 w-16 h-16 bg-stone-800 text-white rounded-full shadow-2xl flex items-center justify-center btn-active-scale z-20">
+            <i data-lucide="plus" class="w-7 h-7"></i>
+        </button>
 
-        <!-- Modals -->
-        
-        <!-- 交易紀錄新增/編輯 -->
         <transition name="fade">
             <div v-if="showModal" class="fixed inset-0 bg-black/30 backdrop-blur-sm z-30 flex items-end sm:items-center justify-center p-0" @click.self="closeModal">
                 <transition name="slide-up">
-                    <div class="bg-white w-full max-w-md rounded-t-[3rem] p-10 safe-area-bottom shadow-2xl">
+                    <div v-if="showModal" class="bg-white w-full max-w-md rounded-t-[3rem] p-10 safe-area-bottom shadow-2xl overflow-y-auto custom-scrollbar max-h-[90vh]">
                         <div class="flex justify-between items-center mb-8">
-                            <h2 class="text-xl font-light text-stone-800">{{ isEditing ? '編輯這筆紀錄' : '紀錄一段日常' }}</h2>
+                            <h2 class="text-xl font-light text-stone-800">{{ isEditing ? '編輯紀錄' : '日常紀錄' }}</h2>
                             <button @click="closeModal" class="p-2"><i data-lucide="x" class="w-6 h-6 text-stone-300"></i></button>
                         </div>
                         <div class="space-y-6">
                             <div class="flex p-1 bg-stone-50 rounded-2xl border border-stone-100">
-                                <button v-for="t in ['expense', 'income']" :key="t" @click="setFormType(t)" :class="form.type === t ? 'bg-white shadow-sm text-stone-800' : 'text-stone-400'" class="flex-1 py-3 text-xs font-bold rounded-xl transition-all">{{ t === 'expense' ? '支出' : '收入' }}</button>
-                            </div>
-                            <div v-if="form.type === 'income'" class="flex items-center justify-between px-2">
-                                <span class="text-xs text-stone-500 font-medium">款項是否已經入帳？</span>
-                                <button @click="form.isPending = !form.isPending" :class="!form.isPending ? 'bg-emerald-500' : 'bg-stone-200'" class="w-12 h-6 rounded-full relative transition-colors"><div class="absolute top-1 w-4 h-4 bg-white rounded-full transition-all shadow-sm" :class="!form.isPending ? 'right-1' : 'left-1'"></div></button>
+                                <button v-for="t in ['expense', 'income', 'transfer']" :key="t" @click="setFormType(t)" 
+                                        :class="form.type === t ? 'bg-white shadow-sm text-stone-800' : 'text-stone-400'" 
+                                        class="flex-1 py-3 text-xs font-bold rounded-xl transition-all">
+                                    {{ t === 'expense' ? '支出' : (t === 'income' ? '收入' : '轉帳') }}
+                                </button>
                             </div>
                             <div class="border-b border-stone-100 pb-2">
                                 <label class="text-[10px] text-stone-400 uppercase tracking-widest block mb-1">Amount</label>
-                                <input type="number" v-model="form.amount" placeholder="0.00" class="w-full text-4xl font-light border-none focus:ring-0 p-0 text-stone-800 placeholder-stone-100">
+                                <input type="number" v-model="form.amount" placeholder="0.00" class="w-full text-4xl font-light border-none focus:ring-0 p-0 text-stone-800">
                             </div>
-                            <div class="grid grid-cols-2 gap-6">
-                                <div><label class="text-[10px] text-stone-400 block mb-1 uppercase tracking-widest">Category</label><select v-model="form.category" class="w-full bg-stone-50 border-none rounded-2xl text-sm p-4 focus:ring-1 focus:ring-stone-200"><option v-for="cat in categories[form.type]" :key="cat" :value="cat">{{ cat }}</option></select></div>
-                                <div><label class="text-[10px] text-stone-400 block mb-1 uppercase tracking-widest">Date</label><input type="date" v-model="form.date" class="w-full bg-stone-50 border-none rounded-2xl text-sm p-4 focus:ring-1 focus:ring-stone-200"></div>
+                            <!-- 轉帳專用欄位 -->
+                            <div v-if="form.type === 'transfer'" class="grid grid-cols-2 gap-6">
+                                <div><label class="text-[10px] text-stone-400 block mb-1 uppercase tracking-widest">Source 轉出</label><select v-model="form.assetId" class="w-full bg-stone-50 border-none rounded-2xl text-sm p-4"><option v-for="a in assets" :key="a.id" :value="a.id">{{ a.name }}</option></select></div>
+                                <div><label class="text-[10px] text-stone-400 block mb-1 uppercase tracking-widest">Target 轉入</label><select v-model="form.toAssetId" class="w-full bg-stone-50 border-none rounded-2xl text-sm p-4"><option v-for="a in assets" :key="a.id" :value="a.id">{{ a.name }}</option></select></div>
                             </div>
-                            <div v-if="form.type === 'income' && form.isPending">
-                                <label class="text-[10px] text-stone-400 block mb-1 uppercase tracking-widest">Debtor / Counterparty</label>
-                                <input type="text" v-model="form.counterparty" placeholder="誰欠你這筆錢？" class="w-full bg-stone-50 border-none rounded-2xl text-sm p-4 focus:ring-1 focus:ring-stone-200">
+                            <div v-else class="grid grid-cols-2 gap-6">
+                                <div><label class="text-[10px] text-stone-400 block mb-1 uppercase tracking-widest">Account</label><select v-model="form.assetId" class="w-full bg-stone-50 border-none rounded-2xl text-sm p-4"><option v-for="a in assets" :key="a.id" :value="a.id">{{ a.name }}</option></select></div>
+                                <div><label class="text-[10px] text-stone-400 block mb-1 uppercase tracking-widest">Category</label><select v-model="form.category" class="w-full bg-stone-50 border-none rounded-2xl text-sm p-4"><option v-for="cat in categories[form.type]" :key="cat" :value="cat">{{ cat }}</option></select></div>
                             </div>
-                            <div>
-                                <label class="text-[10px] text-stone-400 block mb-1 uppercase tracking-widest">Notes</label>
-                                <textarea v-model="form.note" rows="2" placeholder="備註一點細節..." class="w-full bg-stone-50 border-none rounded-2xl text-sm p-4 resize-none focus:ring-1 focus:ring-stone-200"></textarea>
-                            </div>
+                            <div class="grid grid-cols-1"><label class="text-[10px] text-stone-400 block mb-1 uppercase tracking-widest">Date</label><input type="date" v-model="form.date" class="w-full bg-stone-50 border-none rounded-2xl text-sm p-4"></div>
+                            <div v-if="form.type === 'income'" class="flex items-center justify-between px-2"><span class="text-xs text-stone-500 font-medium">已入帳？</span><button @click="form.isPending = !form.isPending" :class="!form.isPending ? 'bg-emerald-500' : 'bg-stone-200'" class="w-12 h-6 rounded-full relative"><div class="absolute top-1 w-4 h-4 bg-white rounded-full shadow-sm transition-all" :class="!form.isPending ? 'right-1' : 'left-1'"></div></button></div>
+                            <div v-if="form.type === 'income' && form.isPending"><label class="text-[10px] text-stone-400 block mb-1 uppercase tracking-widest">Debtor</label><input type="text" v-model="form.counterparty" placeholder="誰欠你錢？" class="w-full bg-stone-50 border-none rounded-2xl text-sm p-4"></div>
+                            <textarea v-model="form.note" rows="2" placeholder="備註內容..." class="w-full bg-stone-50 border-none rounded-2xl text-sm p-4 resize-none"></textarea>
                             <div class="flex space-x-4 pt-4">
-                                <button v-if="isEditing" @click="deleteRecord" class="w-14 h-14 bg-rose-50 text-rose-400 rounded-2xl flex items-center justify-center btn-active-scale transition-transform"><i data-lucide="trash-2" class="w-6 h-6"></i></button>
-                                <button @click="saveRecord" class="flex-1 h-14 bg-stone-800 text-white rounded-2xl font-bold shadow-xl btn-active-scale transition-transform">{{ isEditing ? '儲存修改' : '確定入帳' }}</button>
+                                <button v-if="isEditing" @click="deleteRecord" class="w-14 h-14 bg-rose-50 text-rose-400 rounded-2xl flex items-center justify-center btn-active-scale"><i data-lucide="trash-2" class="w-6 h-6"></i></button>
+                                <button @click="saveRecord" class="flex-1 h-14 bg-stone-800 text-white rounded-2xl font-bold shadow-xl btn-active-scale">{{ isEditing ? '修改' : '儲存' }}</button>
                             </div>
                         </div>
                     </div>
@@ -306,86 +326,54 @@
             </div>
         </transition>
 
-        <!-- 資產帳戶新增/編輯彈窗 -->
         <transition name="fade">
             <div v-if="showAssetModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-6" @click.self="showAssetModal = false">
                 <div class="bg-white w-full max-w-sm rounded-[2.5rem] p-8 shadow-2xl">
                     <div class="flex justify-between items-center mb-8">
-                        <h2 class="text-base font-bold tracking-widest text-stone-800">{{ isEditingAsset ? '資產帳戶設定' : '新增資產帳戶' }}</h2>
+                        <h2 class="text-base font-bold text-stone-800 tracking-widest">{{ isEditingAsset ? '資產設定' : '新增資產' }}</h2>
                         <button @click="showAssetModal = false" class="p-1"><i data-lucide="x" class="w-5 h-5 text-stone-300"></i></button>
                     </div>
                     <div class="space-y-6">
                         <div>
-                            <label class="text-[10px] text-stone-400 uppercase tracking-widest block mb-1">Account Name</label>
-                            <input type="text" v-model="assetForm.name" placeholder="例如：現金、玉山銀行..." class="w-full bg-stone-50 border-none rounded-2xl text-sm p-4 focus:ring-1 focus:ring-stone-200">
+                            <label class="text-[10px] text-stone-400 uppercase tracking-widest block mb-2">Account Type</label>
+                            <div class="grid grid-cols-3 gap-2">
+                                <button v-for="type in assetTypes" :key="type.name" @click="assetForm.type = type.name"
+                                        :class="assetForm.type === type.name ? 'bg-stone-800 text-white border-stone-800' : 'bg-stone-50 text-stone-400 border-stone-100'"
+                                        class="flex flex-col items-center justify-center p-3 rounded-2xl border transition-all">
+                                    <i :data-lucide="type.icon" class="w-5 h-5 mb-1"></i>
+                                    <span class="text-[9px] font-bold">{{ type.name }}</span>
+                                </button>
+                            </div>
                         </div>
-                        <div v-if="!isEditingAsset">
-                            <label class="text-[10px] text-stone-400 uppercase tracking-widest block mb-1">Initial Balance</label>
-                            <input type="number" v-model="assetForm.initialBalance" placeholder="0" class="w-full bg-stone-50 border-none rounded-2xl text-sm p-4 focus:ring-1 focus:ring-stone-200">
-                            <p class="text-[9px] text-stone-300 mt-2 tracking-tight">系統會自動產生一筆「初始餘額」的入帳紀錄。</p>
-                        </div>
+                        <div><label class="text-[10px] text-stone-400 uppercase tracking-widest block mb-1">Account Name</label><input type="text" v-model="assetForm.name" placeholder="例如：現金、玉山銀行..." class="w-full bg-stone-50 border-none rounded-2xl text-sm p-4"></div>
+                        <div v-if="!isEditingAsset"><label class="text-[10px] text-stone-400 uppercase tracking-widest block mb-1">Initial Balance</label><input type="number" v-model="assetForm.initialBalance" placeholder="0" class="w-full bg-stone-50 border-none rounded-2xl text-sm p-4"></div>
                         <div class="flex gap-4 pt-4">
                             <button v-if="isEditingAsset && assets.length > 1" @click="confirmDeleteAsset" class="w-14 h-14 bg-rose-50 text-rose-400 rounded-2xl flex items-center justify-center btn-active-scale"><i data-lucide="trash-2" class="w-5 h-5"></i></button>
-                            <button @click="saveAsset" class="flex-1 h-14 bg-stone-800 text-white rounded-2xl font-bold shadow-xl btn-active-scale transition-transform">儲存並應用</button>
+                            <button @click="saveAsset" class="flex-1 h-14 bg-stone-800 text-white rounded-2xl font-bold shadow-xl btn-active-scale">儲存並應用</button>
                         </div>
                     </div>
                 </div>
             </div>
         </transition>
 
-        <!-- 分類明細彈窗 -->
-        <transition name="fade">
-            <div v-if="showCategoryModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-6" @click.self="showCategoryModal = false">
-                <div class="bg-white w-full max-w-sm rounded-[2.5rem] p-8 shadow-2xl flex flex-col max-h-[75vh]">
-                    <div class="flex justify-between items-center mb-6 shrink-0">
-                        <h2 class="text-base font-bold text-stone-800">{{ selectedCategory }} 明細彙整</h2>
-                        <button @click="showCategoryModal = false" class="p-1"><i data-lucide="x" class="w-5 h-5 text-stone-300"></i></button>
-                    </div>
-                    <div class="flex-1 overflow-y-auto custom-scrollbar space-y-4 pr-1">
-                        <div v-for="record in categoryDetailRecords" :key="record.id" class="flex justify-between items-center py-3 border-b border-stone-50">
-                            <div>
-                                <p class="text-xs font-bold text-stone-700">{{ formatDateHeader(record.date) }}</p>
-                                <p class="text-[9px] text-stone-400 mt-0.5">{{ record.note || '無紀錄備註' }}</p>
-                            </div>
-                            <span class="text-xs font-bold text-stone-800">{{ formatCurrency(record.amount) }}</span>
-                        </div>
-                    </div>
-                    <div class="mt-6 pt-5 border-t border-stone-100 flex justify-between shrink-0">
-                        <span class="text-xs font-bold text-stone-400 uppercase">Monthly Total</span>
-                        <span class="text-base font-bold text-stone-800">{{ formatCurrency(categoryDetailTotal) }}</span>
-                    </div>
-                </div>
-            </div>
-        </transition>
-
-        <!-- Bottom Nav -->
         <nav class="absolute bottom-0 left-0 right-0 bg-white/95 backdrop-blur-lg border-t border-stone-100 px-6 py-5 flex justify-around safe-area-bottom z-10 shadow-lg">
             <button v-for="tab in [{id:'overview',icon:'layout',label:'概覽'}, {id:'stats',icon:'bar-chart-2',label:'分析'}, {id:'assets',icon:'wallet',label:'資產'}, {id:'settings',icon:'settings',label:'管理'}]" 
                     :key="tab.id" @click="activeTab = tab.id" :class="activeTab === tab.id ? 'text-stone-800' : 'text-stone-300'" class="flex flex-col items-center flex-1 transition-all">
                 <i :data-lucide="tab.icon" class="w-5.5 h-5.5 mb-1.5"></i>
-                <span class="text-[9px] font-bold tracking-widest">{{ tab.label }}</span>
+                <span class="text-[9px] font-bold tracking-widest uppercase">{{ tab.label }}</span>
             </button>
         </nav>
     </div>
 
     <script>
-        // Firebase Configuration
-        const firebaseConfig = {
-            apiKey: "AIzaSyBbU7mRHAd7jr8TU_X_MqcIRgzu1j70EXU",
-            authDomain: "family-mommy.firebaseapp.com",
-            projectId: "family-mommy",
-            storageBucket: "family-mommy.firebasestorage.app",
-            messagingSenderId: "70999345481",
-            appId: "1:70999345481:web:94735ebf686ad9617af298",
-            measurementId: "G-033FT20MY6"
-        };
-
-        const app = firebase.initializeApp(firebaseConfig);
-        const db = firebase.firestore(app);
-        const auth = firebase.auth(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'daily-diary-v1';
-
+        const firebaseConfig = { apiKey: "AIzaSyBbU7mRHAd7jr8TU_X_MqcIRgzu1j70EXU", authDomain: "family-mommy.firebaseapp.com", projectId: "family-mommy", storageBucket: "family-mommy.firebasestorage.app", messagingSenderId: "70999345481", appId: "1:70999345481:web:94735ebf686ad9617af298", measurementId: "G-033FT20MY6" };
+        const firebaseApp = firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore(firebaseApp);
+        const auth = firebase.auth(firebaseApp);
         const { createApp, ref, computed, onMounted, watch, nextTick } = Vue;
+
+        // 固定同步金鑰，實現自動跨裝置同步
+        const APP_CHANNEL_ID = 'vlog-diary-shared-channel';
 
         createApp({
             setup() {
@@ -396,92 +384,89 @@
                 const isEditing = ref(false);
                 const showAssetModal = ref(false);
                 const isEditingAsset = ref(false);
-                const showCategoryModal = ref(false);
-                const selectedCategory = ref('');
+                const syncStatus = ref('syncing');
                 
                 const viewingYear = ref(new Date().getFullYear());
                 const viewingMonth = ref(new Date().getMonth());
 
                 const records = ref([]);
                 const assets = ref([]);
-                const activeAssetId = ref('');
-                const categories = ref({
-                    expense: ['餐飲', '交通', '購物', '娛樂', '居家', '醫療', '學習', '其他'],
-                    income: ['薪資', '獎金', '投資', '零用錢', '應收帳款', '其他']
-                });
+                const categories = ref({ expense: ['餐飲', '交通', '購物', '娛樂', '居家', '醫療', '學習', '其他'], income: ['薪資', '獎金', '投資', '零用錢', '應收帳款', '其他'], transfer: ['內部轉帳'] });
+                const assetTypes = [{ name: '現金', icon: 'banknote' }, { name: '銀行', icon: 'building-2' }, { name: '證券', icon: 'trending-up' }, { name: '儲值卡', icon: 'credit-card' }, { name: '其他', icon: 'wallet' }];
 
                 const newCatInput = ref({ expense: '', income: '' });
-                const form = ref({ id: null, type: 'expense', amount: null, category: '', date: new Date().toISOString().split('T')[0], note: '', isPending: false, counterparty: '', assetId: '' });
-                const assetForm = ref({ id: null, name: '', initialBalance: 0 });
+                const form = ref({ id: null, type: 'expense', amount: null, category: '', date: new Date().toISOString().split('T')[0], note: '', isPending: false, counterparty: '', assetId: '', toAssetId: '' });
+                const assetForm = ref({ id: null, name: '', type: '現金', initialBalance: 0 });
 
-                const icons = { '餐飲': 'coffee', '交通': 'car', '購物': 'shopping-bag', '娛樂': 'clapperboard', '居家': 'home', '醫療': 'heart-pulse', '學習': 'book-open', '其他': 'more-horizontal', '薪資': 'wallet', '獎金': 'gift', '投資': 'trending-up', '零用錢': 'piggy-bank', '應收帳款': 'hand-coins' };
+                const icons = { '餐飲': 'coffee', '交通': 'car', '購物': 'shopping-bag', '娛樂': 'clapperboard', '居家': 'home', '醫療': 'heart-pulse', '學習': 'book-open', '其他': 'more-horizontal', '薪資': 'wallet', '獎金': 'gift', '投資': 'trending-up', '零用錢': 'piggy-bank', '應收帳款': 'hand-coins', '轉帳': 'arrow-right-left' };
 
-                onMounted(async () => {
+                let unsubAssets = null, unsubRecords = null, unsubCategories = null;
+
+                const setupSync = async () => {
+                    loading.value = true;
                     try {
                         const result = await auth.signInAnonymously();
                         user.value = result.user;
-                        
-                        const userPath = db.collection('artifacts').doc(appId).collection('users').doc(user.value.uid);
+                        const syncPath = db.collection('artifacts').doc(APP_CHANNEL_ID);
 
-                        // Real-time Assets
-                        userPath.collection('assets').onSnapshot(snap => {
+                        // 監聽連線狀態
+                        db.doc('.info/connected').onSnapshot(s => { syncStatus.value = s.data()?.connected ? 'synced' : 'offline'; });
+
+                        // 監聽資產
+                        unsubAssets = syncPath.collection('assets').onSnapshot(snap => {
                             assets.value = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                            if (assets.value.length === 0) {
-                                saveAssetLocal("預設現金帳戶", 0);
-                            } else if (!activeAssetId.value) {
-                                activeAssetId.value = assets.value[0].id;
+                            // 如果完全沒資料（第一台裝置載入），建立預設
+                            if (!snap.metadata.fromCache && assets.value.length === 0) {
+                                saveAssetLocal("現金主帳戶", 0, null, "現金");
                             }
                             nextTick(() => lucide.createIcons());
                         });
 
-                        // Real-time Records
-                        userPath.collection('records').onSnapshot(snap => {
+                        // 監聽紀錄
+                        unsubRecords = syncPath.collection('records').onSnapshot({ includeMetadataChanges: true }, snap => {
                             records.value = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                            syncStatus.value = snap.metadata.hasPendingWrites ? 'syncing' : 'synced';
                             loading.value = false;
                             nextTick(() => lucide.createIcons());
                         });
 
-                        // Real-time Settings
-                        userPath.collection('settings').doc('categories').onSnapshot(doc => {
+                        // 監聽分類設定
+                        unsubCategories = syncPath.collection('settings').doc('categories').onSnapshot(doc => {
                             if (doc.exists) categories.value = doc.data();
                         });
+                    } catch (e) { console.error(e); loading.value = false; }
+                };
 
-                    } catch (e) { 
-                        console.error("Firebase Sync Error:", e); 
-                        loading.value = false;
+                onMounted(() => setupSync());
+                watch([activeTab, showModal, showAssetModal], () => nextTick(() => lucide.createIcons()));
+
+                const getAssetName = (id) => assets.value.find(a => a.id === id)?.name || '未知帳戶';
+                const getAssetBalance = (id) => records.value.reduce((sum, r) => {
+                    if (r.type === 'transfer') {
+                        if (r.assetId === id) return sum - Number(r.amount);
+                        if (r.toAssetId === id) return sum + Number(r.amount);
+                    } else if (r.assetId === id) {
+                        if (r.type === 'income') return r.isPending ? sum : sum + Number(r.amount);
+                        if (r.type === 'expense') return sum - Number(r.amount);
                     }
-                });
+                    return sum;
+                }, 0);
 
-                watch([activeTab, showModal, showAssetModal, showCategoryModal], () => {
-                    nextTick(() => lucide.createIcons());
-                });
-
-                const switchAsset = (asset) => { activeAssetId.value = asset.id; };
-                const getAssetBalance = (id) => records.value.filter(r => r.assetId === id).reduce((s, r) => r.type === 'income' ? (r.isPending ? s : s + Number(r.amount)) : s - Number(r.amount), 0);
                 const totalGlobalBalance = computed(() => assets.value.reduce((sum, asset) => sum + getAssetBalance(asset.id), 0));
-                const activeAsset = computed(() => assets.value.find(a => a.id === activeAssetId.value));
-                
-                const filteredRecords = computed(() => records.value.filter(r => { 
-                    const d = new Date(r.date); 
-                    return r.assetId === activeAssetId.value && d.getMonth() === viewingMonth.value && d.getFullYear() === viewingYear.value; 
-                }).sort((a,b) => new Date(b.date)-new Date(a.date)));
-                
-                const groupedRecords = computed(() => { 
-                    const g = {}; 
-                    filteredRecords.value.forEach(r => { if(!g[r.date]) g[r.date] = []; g[r.date].push(r); }); 
-                    return Object.keys(g).sort((a,b) => new Date(b)-new Date(a)).map(d => ({date: d, records: g[d]})); 
-                });
+                const filteredRecords = computed(() => records.value.filter(r => { const d = new Date(r.date); return d.getMonth() === viewingMonth.value && d.getFullYear() === viewingYear.value; }).sort((a,b) => new Date(b.date)-new Date(a.date)));
+                const groupedRecords = computed(() => { const g = {}; filteredRecords.value.forEach(r => { if(!g[r.date]) g[r.date] = []; g[r.date].push(r); }); return Object.keys(g).sort((a,b) => new Date(b)-new Date(a)).map(d => ({date: d, records: g[d]})); });
                 
                 const totalIncome = computed(() => filteredRecords.value.filter(r => r.type === 'income' && !r.isPending).reduce((s,r) => s + Number(r.amount), 0));
                 const totalExpense = computed(() => filteredRecords.value.filter(r => r.type === 'expense').reduce((s,r) => s + Number(r.amount), 0));
+                
                 const receivablesByPerson = computed(() => { 
-                    const pending = records.value.filter(r => r.isPending && r.assetId === activeAssetId.value); 
+                    const pending = records.value.filter(r => r.isPending); 
                     const g = {}; 
                     pending.forEach(r => { const n = r.counterparty || '不具名'; if(!g[n]) g[n] = { name: n, total: 0 }; g[n].total += Number(r.amount); }); 
                     return Object.values(g).sort((a,b) => b.total - a.total); 
                 });
-                const totalPendingCount = computed(() => records.value.filter(r => r.isPending && r.assetId === activeAssetId.value).length);
-                
+                const totalPendingCount = computed(() => records.value.filter(r => r.isPending).length);
+
                 const categoryStats = computed(() => { 
                     const exps = filteredRecords.value.filter(r => r.type === 'expense'); 
                     const total = exps.reduce((s,r) => s + Number(r.amount), 0); 
@@ -491,81 +476,73 @@
                     return Object.keys(g).map(k => ({ category: k, total: g[k], percentage: Math.round((g[k]/total)*100) })).sort((a,b) => b.total - a.total); 
                 });
 
-                const daysInMonth = computed(() => new Date(viewingYear.value, viewingMonth.value + 1, 0).getDate());
-                const calendarPadding = computed(() => new Date(viewingYear.value, viewingMonth.value, 1).getDay());
-                const hasRecord = (day) => { const dStr = `${viewingYear.value}-${String(viewingMonth.value + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`; return records.value.some(r => r.date === dStr && r.assetId === activeAssetId.value); };
-                const getDayColor = (day) => { 
-                    const dStr = `${viewingYear.value}-${String(viewingMonth.value + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`; 
-                    const dayRecs = records.value.filter(r => r.date === dStr && r.assetId === activeAssetId.value); 
-                    if (dayRecs.some(r => r.type === 'income') && dayRecs.some(r => r.type === 'expense')) return 'bg-stone-400'; 
-                    if (dayRecs.some(r => r.type === 'income')) return 'bg-emerald-400'; 
-                    return 'bg-stone-300'; 
-                };
-                const isToday = (day) => { const now = new Date(); return now.getDate() === day && now.getMonth() === viewingMonth.value && now.getFullYear() === viewingYear.value; };
-                
+                const trendData = computed(() => {
+                    const days = new Date(viewingYear.value, viewingMonth.value + 1, 0).getDate();
+                    const data = [];
+                    for (let i = 1; i <= days; i++) {
+                        const dStr = `${viewingYear.value}-${String(viewingMonth.value+1).padStart(2,'0')}-${String(i).padStart(2,'0')}`;
+                        const dayRecs = records.value.filter(r => r.date === dStr);
+                        data.push({
+                            income: dayRecs.filter(r => r.type === 'income' && !r.isPending).reduce((s,r) => s + Number(r.amount), 0),
+                            expense: dayRecs.filter(r => r.type === 'expense').reduce((s,r) => s + Number(r.amount), 0)
+                        });
+                    }
+                    return data;
+                });
+                const maxTrendValue = computed(() => Math.max(...trendData.value.map(d => Math.max(d.income, d.expense, 500))));
+
                 const saveRecord = async () => {
-                    if (!user.value || !form.value.amount) return;
-                    const data = { ...form.value, assetId: activeAssetId.value, amount: Number(form.value.amount) };
+                    if (!user.value || !form.value.amount || !form.value.assetId) return;
+                    showModal.value = false;
+                    const data = { ...form.value, amount: Number(form.value.amount) };
                     const id = data.id; delete data.id;
-                    const coll = db.collection('artifacts').doc(appId).collection('users').doc(user.value.uid).collection('records');
-                    if (isEditing.value) await coll.doc(id).set(data);
-                    else await coll.add(data);
+                    const coll = db.collection('artifacts').doc(APP_CHANNEL_ID).collection('records');
+                    if (isEditing.value) await coll.doc(id).set(data); else await coll.add(data);
                     closeModal();
                 };
 
                 const deleteRecord = async () => {
                     if (!user.value || !form.value.id) return;
-                    await db.collection('artifacts').doc(appId).collection('users').doc(user.value.uid).collection('records').doc(form.value.id).delete();
+                    showModal.value = false;
+                    await db.collection('artifacts').doc(APP_CHANNEL_ID).collection('records').doc(form.value.id).delete();
                     closeModal();
                 };
 
                 const saveAsset = async () => {
                     if (!user.value || !assetForm.value.name) return;
-                    try {
-                        await saveAssetLocal(assetForm.value.name, assetForm.value.initialBalance, assetForm.value.id);
-                        showAssetModal.value = false; // 修復點：儲存後立即關閉視窗
-                    } catch (e) {
-                        console.error(e);
-                        showAssetModal.value = false; // 發生錯誤也建議關閉，或改為提示
-                    }
+                    showAssetModal.value = false;
+                    await saveAssetLocal(assetForm.value.name, assetForm.value.initialBalance, assetForm.value.id, assetForm.value.type);
                 };
 
-                const saveAssetLocal = async (name, initial, id = null) => {
-                    const coll = db.collection('artifacts').doc(appId).collection('users').doc(user.value.uid).collection('assets');
+                const saveAssetLocal = async (name, initial, id = null, type = "現金") => {
+                    const coll = db.collection('artifacts').doc(APP_CHANNEL_ID).collection('assets');
                     if (id) {
-                        await coll.doc(id).update({ name });
+                        await coll.doc(id).update({ name, type });
                     } else {
-                        const ref = await coll.add({ name });
+                        const ref = await coll.add({ name, type });
                         if (initial > 0) {
-                            await db.collection('artifacts').doc(appId).collection('users').doc(user.value.uid).collection('records').add({
+                            await db.collection('artifacts').doc(APP_CHANNEL_ID).collection('records').add({
                                 type: 'income', amount: Number(initial), category: '其他', date: new Date().toISOString().split('T')[0], note: '帳戶初始餘額', isPending: false, assetId: ref.id
                             });
                         }
-                        activeAssetId.value = ref.id;
                     }
                 };
 
                 const confirmDeleteAsset = async () => {
                     if (assets.value.length <= 1 || !user.value) return;
-                    try {
-                        const id = assetForm.value.id;
-                        const batch = db.batch();
-                        const recs = records.value.filter(r => r.assetId === id);
-                        recs.forEach(r => batch.delete(db.collection('artifacts').doc(appId).collection('users').doc(user.value.uid).collection('records').doc(r.id)));
-                        batch.delete(db.collection('artifacts').doc(appId).collection('users').doc(user.value.uid).collection('assets').doc(id));
-                        await batch.commit();
-                        showAssetModal.value = false; // 修復點：刪除後立即關閉視窗
-                    } catch (e) {
-                        console.error(e);
-                        showAssetModal.value = false;
-                    }
+                    showAssetModal.value = false;
+                    const id = assetForm.value.id;
+                    const batch = db.batch();
+                    records.value.filter(r => r.assetId === id || r.toAssetId === id).forEach(r => batch.delete(db.collection('artifacts').doc(APP_CHANNEL_ID).collection('records').doc(r.id)));
+                    batch.delete(db.collection('artifacts').doc(APP_CHANNEL_ID).collection('assets').doc(id));
+                    await batch.commit();
                 };
 
                 const addCategory = async (type) => {
                     const val = newCatInput.value[type].trim();
                     if (val && !categories.value[type].includes(val)) {
                         categories.value[type].push(val);
-                        await db.collection('artifacts').doc(appId).collection('users').doc(user.value.uid).collection('settings').doc('categories').set(categories.value);
+                        await db.collection('artifacts').doc(APP_CHANNEL_ID).collection('settings').doc('categories').set(categories.value);
                         newCatInput.value[type] = '';
                     }
                 };
@@ -573,33 +550,34 @@
                 const deleteCategory = async (type, index) => {
                     if (categories.value[type].length > 1) {
                         categories.value[type].splice(index, 1);
-                        await db.collection('artifacts').doc(appId).collection('users').doc(user.value.uid).collection('settings').doc('categories').set(categories.value);
+                        await db.collection('artifacts').doc(APP_CHANNEL_ID).collection('settings').doc('categories').set(categories.value);
                     }
                 };
 
-                const showCategoryDetailModal = (cat) => { selectedCategory.value = cat; showCategoryModal.value = true; };
-                const categoryDetailRecords = computed(() => filteredRecords.value.filter(r => r.category === selectedCategory.value));
-                const categoryDetailTotal = computed(() => categoryDetailRecords.value.reduce((s,r) => s + Number(r.amount), 0));
-                
-                const closeModal = () => { 
-                    showModal.value = false; 
-                    isEditing.value = false; 
-                    form.value = { id: null, type: 'expense', amount: null, category: categories.value.expense[0], date: new Date().toISOString().split('T')[0], note: '', isPending: false, counterparty: '', assetId: activeAssetId.value }; 
-                };
-                
+                const daysInMonth = computed(() => new Date(viewingYear.value, viewingMonth.value + 1, 0).getDate());
+                const calendarPadding = computed(() => new Date(viewingYear.value, viewingMonth.value, 1).getDay());
+                const isToday = (day) => { const now = new Date(); return now.getDate() === day && now.getMonth() === viewingMonth.value && now.getFullYear() === viewingYear.value; };
+                const hasRecord = (day) => { const dStr = `${viewingYear.value}-${String(viewingMonth.value+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`; return records.value.some(r => r.date === dStr); };
+                const getDayColor = (day) => { const dStr = `${viewingYear.value}-${String(viewingMonth.value+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`; const dayRecs = records.value.filter(r => r.date === dStr); if (dayRecs.some(r => r.type === 'income') && dayRecs.some(r => r.type === 'expense')) return 'bg-stone-400'; if (dayRecs.some(r => r.type === 'income')) return 'bg-emerald-400'; return 'bg-stone-300'; };
+
+                const getCategoryIcon = (c, type) => type === 'transfer' ? 'arrow-right-left' : (icons[c] || 'tag');
+                const getAssetTypeIcon = (type) => assetTypes.find(at => at.name === type)?.icon || 'wallet';
+                const getRecordPrefix = (record) => record.type === 'income' ? '+' : (record.type === 'expense' ? '-' : '⇄');
+                const getRecordColorClass = (record) => record.type === 'income' ? (record.isPending ? 'text-amber-500' : 'text-emerald-500') : (record.type === 'expense' ? 'text-stone-700' : 'text-stone-400');
+
+                const setFormType = (t) => { form.value.type = t; form.value.category = categories.value[t]?.[0] || '內部轉帳'; if(t === 'transfer') { form.value.assetId = assets.value[0]?.id; form.value.toAssetId = assets.value[1]?.id || assets.value[0]?.id; } };
+                const closeModal = () => { showModal.value = false; isEditing.value = false; form.value = { id: null, type: 'expense', amount: null, category: categories.value.expense[0], date: new Date().toISOString().split('T')[0], note: '', isPending: false, counterparty: '', assetId: assets.value[0]?.id || '', toAssetId: assets.value[1]?.id || '' }; };
                 const editRecord = (r) => { form.value = {...r}; isEditing.value = true; showModal.value = true; };
-                const openAssetModal = (asset = null) => { if (asset) { isEditingAsset.value = true; assetForm.value = { ...asset }; } else { isEditingAsset.value = false; assetForm.value = { id: null, name: '', initialBalance: 0 }; } showAssetModal.value = true; };
-                const setFormType = (t) => { form.value.type = t; form.value.category = categories.value[t][0]; };
+                const openAssetModal = (asset = null) => { if (asset) { isEditingAsset.value = true; assetForm.value = { ...asset }; } else { isEditingAsset.value = false; assetForm.value = { id: null, name: '', type: '現金', initialBalance: 0 }; } showAssetModal.value = true; };
                 const changeMonth = (s) => { let m = viewingMonth.value + s; let y = viewingYear.value; if (m > 11) { m = 0; y++; } else if (m < 0) { m = 11; y--; } viewingMonth.value = m; viewingYear.value = y; };
                 const formatCurrency = (v) => new Intl.NumberFormat('zh-TW', { style: 'currency', currency: 'TWD', maximumFractionDigits: 0 }).format(v);
                 const formatAmount = (v) => new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 0 }).format(v);
-                const formatDateHeader = (dStr) => { if (dStr === new Date().toISOString().split('T')[0]) return '今天'; const d = new Date(dStr); return `${d.getMonth()+1}月${d.getDate()}日`; };
-                const getCategoryIcon = (c) => icons[c] || 'tag';
+                const formatDateHeader = (dStr) => dStr === new Date().toISOString().split('T')[0] ? '今天' : `${new Date(dStr).getMonth()+1}月${new Date(dStr).getDate()}日`;
 
                 return {
-                    loading, activeTab, showModal, isEditing, showAssetModal, isEditingAsset, viewingYear, viewingMonth, records, assets, activeAssetId, activeAsset, categories, newCatInput, form, assetForm, showCategoryModal, selectedCategory,
-                    totalGlobalBalance, getAssetBalance, daysInMonth, calendarPadding, isToday, hasRecord, getDayColor, changeMonth, groupedRecords, totalIncome, totalExpense, receivablesByPerson, totalPendingCount, categoryStats, categoryDetailRecords, categoryDetailTotal,
-                    switchAsset, openAssetModal, saveAsset, confirmDeleteAsset, addCategory, deleteCategory, setFormType, saveRecord, editRecord, deleteRecord, closeModal, formatCurrency, formatAmount, formatDateHeader, getCategoryIcon, showCategoryDetailModal
+                    loading, activeTab, showModal, isEditing, showAssetModal, isEditingAsset, viewingYear, viewingMonth, records, assets, categories, newCatInput, form, assetForm, assetTypes, syncStatus,
+                    totalGlobalBalance, getAssetBalance, daysInMonth, calendarPadding, isToday, hasRecord, getDayColor, changeMonth, groupedRecords, totalIncome, totalExpense, receivablesByPerson, totalPendingCount, categoryStats, trendData, maxTrendValue,
+                    getAssetName, getRecordPrefix, getRecordColorClass, openAssetModal, saveAsset, confirmDeleteAsset, addCategory, deleteCategory, setFormType, saveRecord, editRecord, deleteRecord, closeModal, formatCurrency, formatAmount, formatDateHeader, getCategoryIcon, getAssetTypeIcon
                 };
             }
         }).mount('#app');
